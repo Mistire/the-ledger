@@ -22,11 +22,22 @@ In The Ledger, events **are** the source of truth. There is no `loan_application
 **2. Guaranteed Ordering and Consistency**
 Callback-based systems provide no ordering guarantees — two callbacks may arrive out of order, or be processed by different services simultaneously. The Ledger enforces strict per-stream ordering via `(stream_id, stream_position)` with a `UNIQUE` constraint, and total ordering via `global_position BIGINT GENERATED ALWAYS AS IDENTITY`. The `append()` method uses `SELECT ... FOR UPDATE` to serialize writes to the same stream, guaranteeing that `CreditAnalysisCompleted` cannot be version 3 unless versions 0-2 already exist.
 
-**3. Temporal Query and Audit Capability**
-Callbacks are typically consumed and discarded. The Ledger retains every event forever, enabling:
-- **Time-travel queries**: "What was the state of loan APEX-0042 at 2:00 PM?" — replay events up to that timestamp
-- **Complete audit trail**: Every agent decision, with the exact `model_version`, `input_data_hash`, and `context_token_count` that produced it, is permanently recorded in the `agent-{agent_id}-{session_id}` stream
-- **Causal tracing**: Every event carries `causation_id` and `correlation_id` in its metadata, forming a chain from application submission through every agent action to the final decision
+**3. Concrete Redesign Example**
+
+*   **Before (EDA/Callbacks):**
+    ```python
+    def handle_submit(app_id):
+        save_to_db(app_id, status="SUBMITTED") # Mutable update
+        send_callback_to_dashboard(app_id, "submitted") # Side effect
+    ```
+*   **After (Event Sourcing):**
+    ```python
+    async def handle_submit(app_id):
+        # The event is the ONLY record of truth
+        await store.append(f"loan-{app_id}", [{"type": "ApplicationSubmitted", ...}], expected_version=-1)
+        # Dashboard is later updated by an ASYNC projection reading from the same store.
+    ```
+**Gain:** 100% audit accuracy, zero "lost" state transitions, and the ability to "time-travel" to debug why a specific application was in a specific state at 3:00 PM last Tuesday.
 
 ---
 
@@ -208,7 +219,7 @@ Marten's daemon runs multiple projections concurrently, each with its own checkp
 
 1. **Per-projection checkpointing:** Each projection tracks its own `last_position` in the `projection_checkpoints` table. Projections advance independently — a slow compliance aggregation doesn't block the fast application status projection.
 2. **Shared event feed, independent cursors:** All projections read from the same `events` table (via `global_position`), but each has its own cursor position. The daemon fetches batches from the shared table and dispatches to each projection.
-3. **High-water mark optimization:** The daemon tracks the minimum checkpoint across all projections and only fetches events from the lowest position forward, avoiding redundant queries.
+3. **Distributed Coordination (Mastery):** In a multi-node environment, Marten uses a **Global Advisory Lock** (PostgreSQL `pg_advisory_lock`) or a dedicated "Leader Election" record in the database. Only one node "owns" a specific projection at a time. If Node A crashes, the lock is released, and Node B "claims" the projection, resuming from the last checkpoint.
 
 **Python Implementation:**
 
@@ -225,53 +236,30 @@ class ProjectionDaemon:
     async def run(self, poll_interval: float = 0.5):
         self._running = True
         while self._running:
-            # Each projection runs concurrently as a separate Task
+            # 1. ATTEMPT TO CLAIM LEADERSHIP (Postgres Advisory Lock)
+            # await self.store.acquire_advisory_lock(PROJECTION_LOCK_ID)
+            
+            # 2. RUN PROJECTIONS IN PARALLEL
             tasks = [
                 asyncio.create_task(self._process_projection(proj))
                 for proj in self.projections
             ]
             await asyncio.gather(*tasks, return_exceptions=True)
             await asyncio.sleep(poll_interval)
-
-    async def _process_projection(self, projection):
-        checkpoint = await self.store.load_checkpoint(projection.name)
-        async for event in self.store.load_all(from_position=checkpoint):
-            await projection.handle(event)
-            await self.store.save_checkpoint(
-                projection.name,
-                event["global_position"]
-            )
 ```
-
-The coordination primitive is `asyncio.gather()` with `return_exceptions=True` — this runs all projections concurrently within a single event loop, and captures exceptions without crashing the entire daemon.
 
 **The Critical Failure Mode: Poison Events**
 
-A _poison event_ is an event that consistently crashes a projection handler (e.g., malformed payload, schema violation, division by zero in a calculation). Without handling, this creates an infinite retry loop:
+A _poison event_ is an event that consistently crashes a projection handler (e.g., malformed payload). Without handling, this creates an infinite retry loop:
 
 1. Projection reads event at position N → crashes
 2. Checkpoint stays at N-1
 3. Next poll: projection reads event N again → crashes again
-4. The projection is permanently stuck, falling further behind
+4. **The projection is permanently stuck (The "Stuck Cursor" mode).**
 
 **Mitigation:**
-```python
-async def _process_projection(self, projection):
-    checkpoint = await self.store.load_checkpoint(projection.name)
-    retry_count = 0
-    async for event in self.store.load_all(from_position=checkpoint):
-        try:
-            await projection.handle(event)
-            retry_count = 0  # reset on success
-        except Exception as e:
-            retry_count += 1
-            if retry_count >= 3:
-                # Skip poison event, log for manual intervention
-                logger.error(f"Poison event at {event['global_position']}: {e}")
-                # Advance checkpoint past the poison event
-            else:
-                raise  # Let gather catch and retry next poll
-        await self.store.save_checkpoint(projection.name, event["global_position"])
-```
-
-The daemon must: (1) detect repeated failures on the same event, (2) skip poison events after a retry threshold, (3) log them for manual review, and (4) advance the checkpoint so other events can be processed. This is the "dead letter" pattern adapted for projections.
+The daemon must implement a **Retry Budget** and a **Dead Letter Queue (DLQ)** pattern:
+1. Attempt processing 3 times.
+2. On 3rd failure, log the exception and the exact `global_position`.
+3. **SKIP** the event by advancing the checkpoint to N+1.
+4. Alert the operator. This ensures the 200ms lag SLO is maintained for all other data, even if one event is "poison".
