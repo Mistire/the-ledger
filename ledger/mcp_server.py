@@ -172,7 +172,14 @@ async def start_agent_session(
     application_id: str,
     model_version: str,
 ) -> dict:
-    """Start a new agent session for a given application."""
+    """
+    Start a new agent session for a given application.
+
+    PRECONDITION: None — this is the first call in any agent workflow.
+    Must be called before any agent decision tools (record_credit_analysis,
+    record_fraud_screening, etc.). Calling decision tools without an active
+    session will return DomainError(rule_violated="gas_town_violation").
+    """
     cmd = StartAgentSessionCommand(
         agent_id=agent_id,
         agent_type=agent_type,
@@ -199,7 +206,15 @@ async def record_credit_analysis(
     risk_tier: str,
     recommended_limit_usd: float,
 ) -> dict:
-    """Record the result of a credit analysis agent run."""
+    """
+    Record the result of a credit analysis agent run.
+
+    PRECONDITION: start_agent_session must have been called with the same
+    agent_id and session_id. The application must be in AWAITING_ANALYSIS state
+    (CreditAnalysisRequested event must exist on the loan stream).
+    Returns DomainError(rule_violated="gas_town_violation") if no active session.
+    Returns DomainError(rule_violated="invalid_transition") if wrong state.
+    """
     cmd = CreditAnalysisCompletedCommand(
         application_id=application_id,
         agent_id=agent_id,
@@ -227,7 +242,12 @@ async def record_fraud_screening(
     risk_level: str,
     recommendation: str,
 ) -> dict:
-    """Record the result of a fraud screening agent run."""
+    """
+    Record the result of a fraud screening agent run.
+
+    PRECONDITION: CreditAnalysisCompleted must exist for this application.
+    The application must be in ANALYSIS_COMPLETE state.
+    """
     cmd = FraudScreeningCompletedCommand(
         application_id=application_id,
         agent_id=agent_id,
@@ -259,7 +279,13 @@ async def record_compliance_check(
     is_hard_block: bool = False,
     failure_reason: str | None = None,
 ) -> dict:
-    """Record a single compliance rule evaluation result."""
+    """
+    Record a single compliance rule evaluation result.
+
+    PRECONDITION: FraudScreeningCompleted must exist for this application.
+    The application must be in COMPLIANCE_REVIEW state.
+    rule_id must be one of: REG-001, REG-002, REG-003, REG-004, REG-005, REG-006.
+    """
     cmd = ComplianceCheckCommand(
         application_id=application_id,
         session_id=session_id,
@@ -290,7 +316,11 @@ async def generate_decision(
 ) -> dict:
     """
     Generate a final decision for a loan application.
-    Enforces confidence floor: confidence < 0.6 forces recommendation to REFER.
+
+    PRECONDITION: All required compliance checks must be completed (all_compliance_passed=True).
+    contributing_agent_sessions must reference valid AgentSession streams that contain
+    decision events for this application_id.
+    CONFIDENCE FLOOR: confidence_score < 0.6 forces recommendation="REFER" regardless of input.
     """
     # Confidence floor enforced here (also enforced in handler, belt-and-suspenders)
     effective_recommendation = recommendation if confidence_score >= 0.6 else "REFER"
@@ -331,7 +361,13 @@ async def record_human_review(
     final_decision: str,
     override_reason: str | None = None,
 ) -> dict:
-    """Record a human reviewer's decision on a loan application."""
+    """
+    Record a human reviewer's decision on a loan application.
+
+    PRECONDITION: generate_decision must have been called and returned recommendation="REFER"
+    (HumanReviewRequested event must exist). Application must be in
+    APPROVED_PENDING_HUMAN or DECLINED_PENDING_HUMAN state.
+    """
     cmd = HumanReviewCompletedCommand(
         application_id=application_id,
         reviewer_id=reviewer_id,
@@ -353,7 +389,10 @@ async def record_human_review(
 async def run_integrity_check_tool(entity_type: str, entity_id: str) -> dict:
     """
     Run a cryptographic integrity check on an entity's event stream.
-    Rate-limited to 1 call per minute per entity.
+
+    PRECONDITION: None — can be called at any time.
+    RATE LIMIT: Maximum 1 call per minute per entity (entity_type + entity_id combination).
+    Returns RateLimitError if called more frequently.
     """
     entity_key = f"{entity_type}:{entity_id}"
     if not _check_rate_limit(entity_key):
@@ -388,7 +427,10 @@ async def run_integrity_check_tool(entity_type: str, entity_id: str) -> dict:
 
 @mcp.resource("ledger://applications/{id}")
 async def get_application(id: str) -> dict:
-    """Get application summary from the read model."""
+    """
+    Get application summary from the read model.
+    SOURCE: application_summary projection table (no event replay)
+    """
     store = _get_store()
     if store._pool is None:
         return {"error": "store not connected"}
@@ -403,7 +445,10 @@ async def get_application(id: str) -> dict:
 
 @mcp.resource("ledger://applications/{id}/compliance")
 async def get_compliance(id: str, as_of: str | None = None) -> dict:
-    """Get compliance audit view for an application, optionally at a point in time."""
+    """
+    Get compliance audit view for an application, optionally at a point in time.
+    SOURCE: compliance_audit_events projection table. Supports ?as_of= for temporal queries using snapshot+delta strategy.
+    """
     if as_of is not None:
         # Use the projection's temporal query when as_of is provided
         if _compliance_projection is None:
@@ -435,7 +480,10 @@ async def get_compliance(id: str, as_of: str | None = None) -> dict:
 
 @mcp.resource("ledger://applications/{id}/audit-trail")
 async def get_audit_trail(id: str, from_pos: int | None = None, to_pos: int | None = None) -> dict:
-    """Get the cryptographic audit trail for a loan application."""
+    """
+    Get the cryptographic audit trail for a loan application.
+    SOURCE: audit-loan-{id} event stream (direct load — justified exception: audit trail must be cryptographically verifiable from raw events, not a projection)
+    """
     store = _get_store()
     try:
         events = await store.load_stream(
@@ -450,7 +498,10 @@ async def get_audit_trail(id: str, from_pos: int | None = None, to_pos: int | No
 
 @mcp.resource("ledger://agents/{id}/performance")
 async def get_agent_performance(id: str) -> dict:
-    """Get agent performance metrics from the read model."""
+    """
+    Get agent performance metrics from the read model.
+    SOURCE: agent_performance_ledger projection table (no event replay)
+    """
     store = _get_store()
     if store._pool is None:
         return {"error": "store not connected"}
@@ -465,7 +516,10 @@ async def get_agent_performance(id: str) -> dict:
 
 @mcp.resource("ledger://agents/{id}/sessions/{session_id}")
 async def get_agent_session(id: str, session_id: str) -> dict:
-    """Get the full event stream for an agent session."""
+    """
+    Get the full event stream for an agent session.
+    SOURCE: agent-{id}-{session_id} event stream (direct load — justified exception: session replay is required for Gas Town crash recovery)
+    """
     store = _get_store()
     try:
         events = await store.load_stream(f"agent-{id}-{session_id}")
@@ -478,7 +532,10 @@ async def get_agent_session(id: str, session_id: str) -> dict:
 
 @mcp.resource("ledger://ledger/health")
 async def get_health() -> dict:
-    """Get projection daemon health and lag metrics."""
+    """
+    Get projection daemon health and lag metrics.
+    SOURCE: ProjectionDaemon.get_all_lags() — real-time lag metrics, not a projection
+    """
     if _daemon is None:
         return {"healthy": False, "lags": {}, "error": "daemon_not_configured"}
 

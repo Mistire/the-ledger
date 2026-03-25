@@ -31,14 +31,17 @@ class ApplicationSummaryProjection:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _recorded_at(self, event: dict) -> str:
-        """Return ISO timestamp from event, falling back to now."""
+    def _recorded_at(self, event: dict) -> datetime:
+        """Return datetime from event, falling back to now."""
         ra = event.get("recorded_at")
         if ra is None:
-            return datetime.now(UTC).isoformat()
+            return datetime.now(UTC)
         if isinstance(ra, datetime):
-            return ra.isoformat()
-        return str(ra)
+            return ra
+        try:
+            return datetime.fromisoformat(str(ra))
+        except ValueError:
+            return datetime.now(UTC)
 
     def _payload(self, event: dict) -> dict:
         return event.get("payload", {})

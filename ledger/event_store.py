@@ -189,12 +189,20 @@ class EventStore:
             async with conn.transaction():
                 # 1. Lock stream row at DB level (SELECT ... FOR UPDATE)
                 row = await conn.fetchrow(
-                    "SELECT current_version FROM event_streams "
+                    "SELECT current_version, archived_at FROM event_streams "
                     "WHERE stream_id = $1 FOR UPDATE",
                     stream_id,
                 )
 
-                # 2. OCC check — enforced at database level
+                # 2a. Archived check — before OCC
+                if row and row.get("archived_at") is not None:
+                    raise DomainError(
+                        aggregate_id=stream_id,
+                        rule_violated="stream_archived",
+                        message=f"Stream '{stream_id}' is archived and cannot accept new events.",
+                    )
+
+                # 2b. OCC check — enforced at database level
                 current = row["current_version"] if row else -1
                 if current != expected_version:
                     raise OptimisticConcurrencyError(
@@ -282,10 +290,19 @@ class EventStore:
             rows = await conn.fetch(q, *params)
             events = []
             for row in rows:
+                payload = row["payload"]
+                metadata = row["metadata"]
+                # asyncpg returns JSONB as dict, but guard against string edge case
+                if isinstance(payload, str):
+                    import json as _json
+                    payload = _json.loads(payload)
+                if isinstance(metadata, str):
+                    import json as _json
+                    metadata = _json.loads(metadata)
                 e = {
                     **dict(row),
-                    "payload": dict(row["payload"]),
-                    "metadata": dict(row["metadata"]),
+                    "payload": dict(payload) if isinstance(payload, dict) else payload,
+                    "metadata": dict(metadata) if isinstance(metadata, dict) else metadata,
                 }
                 if self.upcasters:
                     e = self.upcasters.upcast(e)
@@ -311,10 +328,18 @@ class EventStore:
                 if not rows:
                     break
                 for row in rows:
+                    payload = row["payload"]
+                    metadata = row["metadata"]
+                    if isinstance(payload, str):
+                        import json as _json
+                        payload = _json.loads(payload)
+                    if isinstance(metadata, str):
+                        import json as _json
+                        metadata = _json.loads(metadata)
                     e = {
                         **dict(row),
-                        "payload": dict(row["payload"]),
-                        "metadata": dict(row["metadata"]),
+                        "payload": dict(payload) if isinstance(payload, dict) else payload,
+                        "metadata": dict(metadata) if isinstance(metadata, dict) else metadata,
                     }
                     if self.upcasters:
                         e = self.upcasters.upcast(e)
@@ -341,6 +366,20 @@ class EventStore:
                 "payload": dict(row["payload"]),
                 "metadata": dict(row["metadata"]),
             }
+
+    # ── 7. archive_stream ────────────────────────────────────────────────────
+
+    async def archive_stream(self, stream_id: str) -> None:
+        """
+        Set archived_at = NOW() on the event_streams row.
+        After archiving, append() will raise DomainError(rule_violated='stream_archived').
+        The stream remains fully readable via load_stream().
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE event_streams SET archived_at = NOW() WHERE stream_id = $1",
+                stream_id,
+            )
 
     # ── 6. get_stream_metadata ───────────────────────────────────────────────
 
@@ -382,6 +421,7 @@ class InMemoryEventStore:
         self._global: list[dict] = []
         self._checkpoints: dict[str, int] = {}
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._archived: set[str] = set()
 
     async def stream_version(self, stream_id: str) -> int:
         return self._versions.get(stream_id, -1)
@@ -396,6 +436,13 @@ class InMemoryEventStore:
         metadata: dict | None = None,
     ) -> list[int]:
         async with self._locks[stream_id]:
+            # Archived check — before OCC
+            if stream_id in self._archived:
+                raise DomainError(
+                    aggregate_id=stream_id,
+                    rule_violated="stream_archived",
+                    message=f"Stream '{stream_id}' is archived and cannot accept new events.",
+                )
             current = self._versions.get(stream_id, -1)
             if current != expected_version:
                 raise OptimisticConcurrencyError(
@@ -465,7 +512,12 @@ class InMemoryEventStore:
             aggregate_type=stream_id.split("-")[0],
             current_version=self._versions[stream_id],
             created_at=datetime.now(UTC),
+            archived_at=datetime.now(UTC) if stream_id in self._archived else None,
         )
+
+    async def archive_stream(self, stream_id: str) -> None:
+        """Mark stream as archived — future appends will raise DomainError(rule_violated='stream_archived')."""
+        self._archived.add(stream_id)
 
     async def save_checkpoint(self, projection_name: str, position: int) -> None:
         self._checkpoints[projection_name] = position

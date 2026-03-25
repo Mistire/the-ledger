@@ -80,6 +80,15 @@ class ComplianceAuditViewProjection:
 
     async def _insert_audit_row(self, conn, application_id: str, event: dict) -> None:
         p = self._payload(event)
+        # Parse recorded_at to datetime if it's a string
+        ra = event.get("recorded_at")
+        if isinstance(ra, str):
+            try:
+                ra = datetime.fromisoformat(ra)
+            except ValueError:
+                ra = datetime.now(UTC)
+        elif ra is None:
+            ra = datetime.now(UTC)
         await conn.execute(
             """
             INSERT INTO compliance_audit_events (
@@ -97,7 +106,7 @@ class ComplianceAuditViewProjection:
             p.get("is_hard_block"),
             p.get("overall_verdict"),
             json.dumps(p),
-            self._recorded_at_str(event),
+            ra,
             event.get("global_position", 0),
         )
 

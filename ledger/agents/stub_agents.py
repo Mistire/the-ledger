@@ -723,15 +723,21 @@ class ComplianceAgent(BaseApexAgent):
     """
 
     def build_graph(self):
+        async def _reg001(s): return await self._evaluate_rule(s, "REG-001")
+        async def _reg002(s): return await self._evaluate_rule(s, "REG-002")
+        async def _reg003(s): return await self._evaluate_rule(s, "REG-003")
+        async def _reg004(s): return await self._evaluate_rule(s, "REG-004")
+        async def _reg005(s): return await self._evaluate_rule(s, "REG-005")
+        async def _reg006(s): return await self._evaluate_rule(s, "REG-006")
         g = StateGraph(ComplianceState)
         g.add_node("validate_inputs",      self._node_validate_inputs)
         g.add_node("load_company_profile", self._node_load_profile)
-        g.add_node("evaluate_reg001",      lambda s: self._evaluate_rule(s, "REG-001"))
-        g.add_node("evaluate_reg002",      lambda s: self._evaluate_rule(s, "REG-002"))
-        g.add_node("evaluate_reg003",      lambda s: self._evaluate_rule(s, "REG-003"))
-        g.add_node("evaluate_reg004",      lambda s: self._evaluate_rule(s, "REG-004"))
-        g.add_node("evaluate_reg005",      lambda s: self._evaluate_rule(s, "REG-005"))
-        g.add_node("evaluate_reg006",      lambda s: self._evaluate_rule(s, "REG-006"))
+        g.add_node("evaluate_reg001",      _reg001)
+        g.add_node("evaluate_reg002",      _reg002)
+        g.add_node("evaluate_reg003",      _reg003)
+        g.add_node("evaluate_reg004",      _reg004)
+        g.add_node("evaluate_reg005",      _reg005)
+        g.add_node("evaluate_reg006",      _reg006)
         g.add_node("write_output",         self._node_write_output)
 
         g.set_entry_point("validate_inputs")

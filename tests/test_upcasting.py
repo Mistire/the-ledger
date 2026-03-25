@@ -174,3 +174,63 @@ async def test_chained_upcasting_v1_to_v3():
     assert "upcasted_to_v3" not in raw_stored["payload"], (
         "upcasted_to_v3 must NOT appear in raw stored payload"
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Reviewer feedback tests — upcaster tightening
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _v1_decision_event(app_id: str) -> dict:
+    """Build a v1 DecisionGenerated payload — no v2 fields."""
+    return {
+        "event_type": "DecisionGenerated",
+        "event_version": 1,
+        "payload": {
+            "application_id": app_id,
+            "recommendation": "APPROVE",
+            "confidence_score": 0.85,
+            "contributing_agent_sessions": [],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_credit_v1_to_v2_model_versions_inference():
+    """model_versions after upcast must be a dict (not None)."""
+    store = InMemoryEventStore(upcaster_registry=registry)
+    app_id = str(uuid.uuid4())
+    stream_id = f"credit-{app_id}"
+    await store.append(stream_id, [_v1_credit_analysis_event(app_id)], expected_version=-1)
+    loaded = (await store.load_stream(stream_id))[0]
+    assert isinstance(loaded["payload"]["model_versions"], dict), (
+        "model_versions must be a dict after upcast"
+    )
+
+
+@pytest.mark.asyncio
+async def test_credit_v1_to_v2_confidence_score_is_none():
+    """confidence_score after upcast must be explicitly None (not fabricated)."""
+    store = InMemoryEventStore(upcaster_registry=registry)
+    app_id = str(uuid.uuid4())
+    stream_id = f"credit-{app_id}"
+    await store.append(stream_id, [_v1_credit_analysis_event(app_id)], expected_version=-1)
+    loaded = (await store.load_stream(stream_id))[0]
+    assert loaded["payload"]["confidence_score"] is None, (
+        "confidence_score must be None — must not be fabricated from v1 data"
+    )
+
+
+@pytest.mark.asyncio
+async def test_decision_v1_to_v2_model_versions_note():
+    """model_versions for DecisionGenerated v1→v2 must contain the reconstruction note."""
+    store = InMemoryEventStore(upcaster_registry=registry)
+    app_id = str(uuid.uuid4())
+    stream_id = f"decision-{app_id}"
+    await store.append(stream_id, [_v1_decision_event(app_id)], expected_version=-1)
+    loaded = (await store.load_stream(stream_id))[0]
+    mv = loaded["payload"]["model_versions"]
+    assert isinstance(mv, dict), "model_versions must be a dict"
+    assert "_note" in mv, "model_versions must contain '_note' key for reconstruction hint"
+    assert "reconstruct_from_contributing_sessions" in mv["_note"], (
+        "reconstruction note must reference contributing sessions"
+    )

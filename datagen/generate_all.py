@@ -145,7 +145,7 @@ async def write_to_db(db_url: str, companies, all_events):
                 ON CONFLICT(company_id) DO NOTHING""",
                 c.company_id,c.name,c.industry,c.naics,c.jurisdiction,c.legal_type,
                 c.founded_year,c.employee_count,c.ein,c.address_city,c.address_state,
-                date.fromisoformat(c.relationship_start),c.account_manager,
+                date.fromisoformat(c.relationship_start) if isinstance(c.relationship_start, str) else c.relationship_start.isoformat(),c.account_manager,
                 c.risk_segment,c.trajectory,c.submission_channel,c.ip_region)
             for f in c.financials:
                 await conn.execute("""INSERT INTO applicant_registry.financial_history

@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 import asyncpg
 from openai import AsyncOpenAI
@@ -40,8 +40,9 @@ async def run_pipeline(application_id: str, phase: str = "all") -> None:
                             → Compliance → DecisionOrchestrator.
     """
     db_url = os.environ.get("DATABASE_URL", "postgresql://localhost/apex_ledger")
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY", "")
+    model = os.environ.get("OPENAI_MODEL", "anthropic/claude-3.5-sonnet")
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://openrouter.ai/api/v1") if not os.environ.get("OPENAI_API_KEY") else None
 
     # Initialize shared resources
     store = EventStore(db_url, upcaster_registry=upcaster_registry)
@@ -50,7 +51,7 @@ async def run_pipeline(application_id: str, phase: str = "all") -> None:
     registry_pool = await asyncpg.create_pool(db_url, min_size=1, max_size=5)
     registry = ApplicantRegistryClient(registry_pool)
 
-    client = AsyncOpenAI(api_key=api_key)
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     agent_id = f"pipeline-runner"
 

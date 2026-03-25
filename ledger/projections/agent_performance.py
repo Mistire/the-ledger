@@ -35,13 +35,16 @@ class AgentPerformanceLedgerProjection:
     def _payload(self, event: dict) -> dict:
         return event.get("payload", {})
 
-    def _recorded_at(self, event: dict) -> str:
+    def _recorded_at(self, event: dict) -> datetime:
         ra = event.get("recorded_at")
         if ra is None:
-            return datetime.now(UTC).isoformat()
+            return datetime.now(UTC)
         if isinstance(ra, datetime):
-            return ra.isoformat()
-        return str(ra)
+            return ra
+        try:
+            return datetime.fromisoformat(str(ra))
+        except ValueError:
+            return datetime.now(UTC)
 
     # ── Handlers ──────────────────────────────────────────────────────────────
 

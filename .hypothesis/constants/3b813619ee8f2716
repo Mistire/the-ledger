@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/projections/compliance_audit.py
+# hypothesis_version: 6.151.9
+
+[100, 1000, 'ComplianceRuleFailed', 'ComplianceRuleNoted', 'ComplianceRulePassed', 'application_id', 'as_of', 'base_state', 'delta_events', 'event_count', 'event_recorded_at', 'event_type', 'events', 'global_position', 'has_hard_block', 'id', 'is_hard_block', 'overall_verdict', 'passed', 'payload', 'recorded_at', 'rule_id', 'rule_name', 'rule_version', 'rules_failed', 'rules_noted', 'rules_passed', 'snapshot_recorded_at', 'snapshot_state', 'snapshot_used']
