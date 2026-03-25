@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/domain/aggregates/agent_session.py
+# hypothesis_version: 6.151.9
+
+['application_id', 'context_source', 'context_token_count', 'event_type', 'gas_town_violation', 'model_version', 'payload', 'session_completed', 'session_failed', 'stream_position']

@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/integrity/audit_chain.py
+# hypothesis_version: 6.151.9
+
+['chain_valid', 'check_timestamp', 'entity_id', 'entity_type', 'event_type', 'event_version', 'events_verified', 'integrity_hash', 'payload', 'previous_hash', 'tamper_detected']

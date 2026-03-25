@@ -16,7 +16,7 @@ dev = [
     "faker>=24.0.0,<26.0",
 ]
 agents = [
-    "anthropic>=0.30.0,<0.40",
+    "openai>=1.0.0",
     "langgraph>=0.1.0,<0.3",
 ]
 datagen = [

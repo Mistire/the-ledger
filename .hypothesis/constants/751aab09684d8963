@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/projections/application_summary.py
+# hypothesis_version: 6.151.9
+
+['APPROVE', 'APPROVED', 'DECLINE', 'DECLINED', 'PENDING_HUMAN_REVIEW', 'REFER', 'applicant_id', 'application_id', 'application_summary', 'approved_amount_usd', 'decision', 'fraud_score', 'overall_verdict', 'payload', 'recommendation', 'recorded_at', 'requested_amount_usd', 'risk_tier']

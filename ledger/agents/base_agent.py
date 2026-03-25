@@ -10,7 +10,7 @@ import asyncio, hashlib, json, time
 from abc import ABC, abstractmethod
 from datetime import datetime
 from uuid import uuid4
-from anthropic import AsyncAnthropic
+from openai import AsyncOpenAI
 from langgraph.graph import StateGraph, END
 
 LANGGRAPH_VERSION = "1.0.0"
@@ -28,7 +28,7 @@ class BaseApexAgent(ABC):
     Each tool/registry call must call self._record_tool_call().
     The write_output node must call self._record_output_written() then self._record_node_execution().
     """
-    def __init__(self, agent_id: str, agent_type: str, store, registry, client: AsyncAnthropic, model="claude-sonnet-4-20250514"):
+    def __init__(self, agent_id: str, agent_type: str, store, registry, client: AsyncOpenAI, model="anthropic/claude-3.5-sonnet"):
         self.agent_id = agent_id; self.agent_type = agent_type
         self.store = store; self.registry = registry; self.client = client; self.model = model
         self.session_id = None; self.application_id = None
@@ -97,31 +97,73 @@ class BaseApexAgent(ABC):
             "error_type":etype,"error_message":emsg[:500],"last_successful_node":f"node_{self._seq}",
             "recoverable":etype in ("llm_timeout","RateLimitError"),"failed_at":datetime.now().isoformat()}})
 
-    async def _append_session(self, event: dict):
-        """TODO: replace print with actual EventStore.append() call"""
-        print(f"  [{self.agent_type[:8]}:{self.session_id}] {event['event_type']}")
+    async def _append_session(self, event: dict) -> None:
+        """Write to agent session stream with OCC retry."""
+        await self._append_with_retry(self._session_stream, [event])
 
-    async def _append_stream(self, stream_id: str, event_dict: dict, causation_id: str = None):
-        """Append to any aggregate stream with OCC retry."""
+    async def _append_with_retry(self, stream_id: str, events: list[dict],
+                                  causation_id: str | None = None) -> list[int]:
+        """OCC-safe append with exponential backoff. MAX_OCC_RETRIES=5."""
+        from ledger.event_store import OptimisticConcurrencyError
         for attempt in range(MAX_OCC_RETRIES):
             try:
                 ver = await self.store.stream_version(stream_id)
-                await self.store.append(stream_id=stream_id, events=[event_dict],
+                return await self.store.append(stream_id, events,
                     expected_version=ver, causation_id=causation_id)
-                return
-            except Exception as e:
-                if "OptimisticConcurrencyError" in type(e).__name__ and attempt < MAX_OCC_RETRIES-1:
-                    await asyncio.sleep(0.1 * (2**attempt)); continue
-                raise
+            except OptimisticConcurrencyError:
+                if attempt < MAX_OCC_RETRIES - 1:
+                    await asyncio.sleep(0.1 * (2 ** attempt))
+                else:
+                    raise
+
+    # Backward-compat alias
+    async def _append_stream(self, stream_id: str, event_dict: dict, causation_id: str = None):
+        """Deprecated alias for _append_with_retry. Use _append_with_retry instead."""
+        return await self._append_with_retry(stream_id, [event_dict], causation_id=causation_id)
+
+    async def _record_input_validated(self, inputs: list[str], ms: int) -> None:
+        await self._append_session({"event_type": "AgentInputValidated", "event_version": 1,
+            "payload": {"session_id": self.session_id, "agent_type": self.agent_type,
+                        "application_id": self.application_id, "inputs_validated": inputs,
+                        "validation_duration_ms": ms, "validated_at": datetime.now().isoformat()}})
+
+    async def _record_input_failed(self, missing: list[str], errors: list[str]) -> None:
+        await self._append_session({"event_type": "AgentInputValidationFailed", "event_version": 1,
+            "payload": {"session_id": self.session_id, "agent_type": self.agent_type,
+                        "application_id": self.application_id, "missing_inputs": missing,
+                        "validation_errors": errors, "failed_at": datetime.now().isoformat()}})
 
     async def _call_llm(self, system, user, max_tokens=1024):
-        resp = await self.client.messages.create(model=self.model, max_tokens=max_tokens,
-            system=system, messages=[{"role":"user","content":user}])
-        t = resp.content[0].text; i = resp.usage.input_tokens; o = resp.usage.output_tokens
+        resp = await self.client.chat.completions.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ]
+        )
+        t = resp.choices[0].message.content
+        i = resp.usage.prompt_tokens
+        o = resp.usage.completion_tokens
         return t, i, o, round(i/1e6*3.0 + o/1e6*15.0, 6)
 
     @staticmethod
     def _sha(d): return hashlib.sha256(json.dumps(str(d),sort_keys=True).encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _parse_json(content: str) -> dict:
+        """Extract and parse JSON from LLM response content."""
+        import re
+        # Try direct parse first
+        try:
+            return json.loads(content)
+        except Exception:
+            pass
+        # Try to extract JSON block
+        m = re.search(r'\{.*\}', content, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+        raise ValueError(f"No JSON found in LLM response: {content[:200]}")
 
 
 class CreditAnalysisAgent(BaseApexAgent):

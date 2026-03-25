@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/domain/aggregates/loan_application.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.6, 'ANALYSIS_COMPLETE', 'APPROVE', 'APPROVED', 'AWAITING_ANALYSIS', 'COMPLIANCE_REVIEW', 'DECLINE', 'DECLINED', 'FINAL_APPROVED', 'FINAL_DECLINED', 'PENDING_DECISION', 'REFER', 'SUBMITTED', 'agent_id', 'applicant_id', 'approved_amount_usd', 'checks_required', 'confidence_score', 'event_type', 'final_decision', 'invalid_transition', 'loan_purpose', 'model_version_lock', 'payload', 'recommendation', 'requested_amount_usd', 'rule_id', 'stream_position']

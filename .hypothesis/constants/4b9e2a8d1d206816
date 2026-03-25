@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/projections/agent_performance.py
+# hypothesis_version: 6.151.9
+
+[0.0, 'APPROVE', 'DECLINE', 'REFER', 'agent_id', 'analyses_completed', 'analysis_duration_ms', 'approve_rate', 'avg_confidence_score', 'avg_duration_ms', 'confidence', 'decision', 'decisions_generated', 'decline_rate', 'human_override_rate', 'model_version', 'override', 'payload', 'recommendation', 'recorded_at', 'refer_rate', 'reviewer_id', 'session_id', 'unknown']

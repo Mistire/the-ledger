@@ -37,7 +37,7 @@ from __future__ import annotations
 import time, json
 from datetime import datetime
 from decimal import Decimal
-from typing import TypedDict, Annotated
+from typing import Any, TypedDict, Annotated
 from uuid import uuid4
 
 from langgraph.graph import StateGraph, END
@@ -83,7 +83,6 @@ class CreditState(TypedDict):
 class CreditAnalysisAgent(BaseApexAgent):
 
     def build_graph(self) -> Any:
-        from typing import Any
         g = StateGraph(CreditState)
         g.add_node("validate_inputs",          self._node_validate_inputs)
         g.add_node("open_credit_record",       self._node_open_credit_record)
@@ -185,19 +184,20 @@ class CreditAnalysisAgent(BaseApexAgent):
         applicant_id = state["applicant_id"]
 
         # Query Applicant Registry (read-only external database)
-        # TODO: implement RegistryClient methods
-        # profile   = await self.registry.get_company(applicant_id)
-        # financials = await self.registry.get_financial_history(applicant_id)
-        # flags     = await self.registry.get_compliance_flags(applicant_id)
-        # loans     = await self.registry.get_loan_relationships(applicant_id)
+        profile_obj = await self.registry.get_company(applicant_id)
+        fin_objs    = await self.registry.get_financial_history(applicant_id)
+        flag_objs   = await self.registry.get_compliance_flags(applicant_id)
+        loan_objs   = await self.registry.get_loan_relationships(applicant_id)
 
-        # PLACEHOLDER
-        profile    = {"company_id": applicant_id, "name": "Company",
-                      "industry": "technology", "trajectory": "STABLE",
-                      "legal_type": "LLC", "jurisdiction": "CA"}
-        financials: list[dict] = []
-        flags:      list[dict] = []
-        loans:      list[dict] = []
+        # Convert dataclasses to dicts for state storage
+        import dataclasses
+        profile    = dataclasses.asdict(profile_obj) if profile_obj else {
+            "company_id": applicant_id, "name": "Unknown", "industry": "unknown",
+            "trajectory": "STABLE", "legal_type": "LLC", "jurisdiction": "CA",
+        }
+        financials = [dataclasses.asdict(f) for f in fin_objs]
+        flags      = [dataclasses.asdict(f) for f in flag_objs]
+        loans      = loan_objs  # already list[dict]
 
         ms = int((time.time() - t) * 1000)
         await self._record_tool_call(

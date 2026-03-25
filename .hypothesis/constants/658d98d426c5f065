@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/projections/daemon.py
+# hypothesis_version: 6.151.9
+
+[0.1, 0.2, 0.4, 500, 1000, 'attempts', 'event', 'event_type', 'global_position', 'handle', 'last_error', 'last_position', 'metadata', 'name', 'payload', 'projection_name', 'recorded_at', 'skipped_at']

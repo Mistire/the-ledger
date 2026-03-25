@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/event_store.py
+# hypothesis_version: 6.151.9
+
+[500, '-', 'DomainError', 'StoredEvent', 'aggregate_type', 'archived_at', 'causation_id', 'correlation_id', 'created_at', 'current_version', 'default', 'event_id', 'event_type', 'event_version', 'global_position', 'metadata', 'payload', 'recorded_at', 'stream_id', 'stream_position']

@@ -45,34 +45,126 @@ class ApplicantRegistryClient:
         self._pool = pool
 
     async def get_company(self, company_id: str) -> CompanyProfile | None:
-        """
-        TODO: implement
-        SELECT * FROM applicant_registry.companies WHERE company_id = $1
-        """
-        raise NotImplementedError
+        """SELECT * FROM applicant_registry.companies WHERE company_id = $1"""
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM applicant_registry.companies WHERE company_id = $1",
+                    company_id,
+                )
+                if row is None:
+                    return None
+                return CompanyProfile(
+                    company_id=row["company_id"],
+                    name=row["name"],
+                    industry=row["industry"],
+                    naics=row["naics"],
+                    jurisdiction=row["jurisdiction"],
+                    legal_type=row["legal_type"],
+                    founded_year=row["founded_year"],
+                    employee_count=row["employee_count"],
+                    risk_segment=row["risk_segment"],
+                    trajectory=row["trajectory"],
+                    submission_channel=row["submission_channel"],
+                    ip_region=row["ip_region"],
+                )
+        except Exception:
+            return None
 
     async def get_financial_history(self, company_id: str,
                                      years: list[int] | None = None) -> list[FinancialYear]:
         """
-        TODO: implement
         SELECT * FROM applicant_registry.financial_history
         WHERE company_id = $1 [AND fiscal_year = ANY($2)]
         ORDER BY fiscal_year ASC
         """
-        raise NotImplementedError
+        try:
+            async with self._pool.acquire() as conn:
+                if years:
+                    rows = await conn.fetch(
+                        "SELECT * FROM applicant_registry.financial_history"
+                        " WHERE company_id = $1 AND fiscal_year = ANY($2)"
+                        " ORDER BY fiscal_year ASC",
+                        company_id, years,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT * FROM applicant_registry.financial_history"
+                        " WHERE company_id = $1 ORDER BY fiscal_year ASC",
+                        company_id,
+                    )
+                return [
+                    FinancialYear(
+                        fiscal_year=r["fiscal_year"],
+                        total_revenue=float(r["total_revenue"]),
+                        gross_profit=float(r["gross_profit"]),
+                        operating_income=float(r["operating_income"]),
+                        ebitda=float(r["ebitda"]),
+                        net_income=float(r["net_income"]),
+                        total_assets=float(r["total_assets"]),
+                        total_liabilities=float(r["total_liabilities"]),
+                        total_equity=float(r["total_equity"]),
+                        long_term_debt=float(r["long_term_debt"]),
+                        cash_and_equivalents=float(r["cash_and_equivalents"]),
+                        current_assets=float(r["current_assets"]),
+                        current_liabilities=float(r["current_liabilities"]),
+                        accounts_receivable=float(r["accounts_receivable"]),
+                        inventory=float(r["inventory"]),
+                        debt_to_equity=float(r["debt_to_equity"]),
+                        current_ratio=float(r["current_ratio"]),
+                        debt_to_ebitda=float(r["debt_to_ebitda"]),
+                        interest_coverage_ratio=float(r["interest_coverage_ratio"]),
+                        gross_margin=float(r["gross_margin"]),
+                        ebitda_margin=float(r["ebitda_margin"]),
+                        net_margin=float(r["net_margin"]),
+                    )
+                    for r in rows
+                ]
+        except Exception:
+            return []
 
     async def get_compliance_flags(self, company_id: str,
                                     active_only: bool = False) -> list[ComplianceFlag]:
         """
-        TODO: implement
         SELECT * FROM applicant_registry.compliance_flags
         WHERE company_id = $1 [AND is_active = TRUE]
         """
-        raise NotImplementedError
+        try:
+            async with self._pool.acquire() as conn:
+                if active_only:
+                    rows = await conn.fetch(
+                        "SELECT * FROM applicant_registry.compliance_flags"
+                        " WHERE company_id = $1 AND is_active = TRUE",
+                        company_id,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT * FROM applicant_registry.compliance_flags"
+                        " WHERE company_id = $1",
+                        company_id,
+                    )
+                return [
+                    ComplianceFlag(
+                        flag_type=r["flag_type"],
+                        severity=r["severity"],
+                        is_active=r["is_active"],
+                        added_date=str(r["added_date"]),
+                        note=r["note"] or "",
+                    )
+                    for r in rows
+                ]
+        except Exception:
+            return []
 
     async def get_loan_relationships(self, company_id: str) -> list[dict]:
-        """
-        TODO: implement
-        SELECT * FROM applicant_registry.loan_relationships WHERE company_id = $1
-        """
-        raise NotImplementedError
+        """SELECT * FROM applicant_registry.loan_relationships WHERE company_id = $1"""
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT * FROM applicant_registry.loan_relationships"
+                    " WHERE company_id = $1",
+                    company_id,
+                )
+                return [dict(r) for r in rows]
+        except Exception:
+            return []

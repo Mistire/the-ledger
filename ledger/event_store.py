@@ -311,11 +311,14 @@ class EventStore:
                 if not rows:
                     break
                 for row in rows:
-                    yield {
+                    e = {
                         **dict(row),
                         "payload": dict(row["payload"]),
                         "metadata": dict(row["metadata"]),
                     }
+                    if self.upcasters:
+                        e = self.upcasters.upcast(e)
+                    yield e
                 pos = rows[-1]["global_position"]
                 if len(rows) < batch_size:
                     break

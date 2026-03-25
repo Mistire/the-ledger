@@ -1,0 +1,4 @@
+# file: /home/mistire/Projects/10Academy/course/week-5/the-ledger/ledger/integrity/gas_town.py
+# hypothesis_version: 6.151.9
+
+[4000, ', ', 'AgentInputValidated', 'AgentSessionFailed', 'AgentSessionStarted', 'DecisionGenerated', 'ExtractionFailed', 'FAILED', 'FraudAnomalyDetected', 'HEALTHY', 'NEEDS_RECONCILIATION', 'agent_type', 'application_id', 'event_type', 'failure_reason', 'missing_inputs', 'none', 'payload', 'stream_position', 'tools_called', 'unknown', 'validation_errors']
