@@ -17,10 +17,8 @@ from hypothesis import strategies as st
 from ledger.commands.handlers import (
     CreditAnalysisCompletedCommand,
     GenerateDecisionCommand,
-    SubmitApplicationCommand,
     handle_credit_analysis_completed,
     handle_generate_decision,
-    handle_submit_application,
 )
 from ledger.event_store import DomainError, InMemoryEventStore
 
@@ -320,34 +318,50 @@ def test_causal_chain_violation_for_invalid_sessions(session_ids):
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # EXAMPLE — Invalid state transition
-# Validates: Requirements 16.1
+# Validates: Requirements 16.1, 16.2
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
 async def test_invalid_state_transition_raises_domain_error():
     """
-    **Validates: Requirements 16.1**
-    Submitting an application that already exists (SUBMITTED → SUBMITTED)
-    must raise DomainError(rule_violated="application_already_exists").
+    **Validates: Requirements 16.1, 16.2**
+    Attempting an invalid state machine transition SUBMITTED → FINAL_APPROVED
+    must raise DomainError(rule_violated="invalid_transition").
     """
+    from ledger.domain.aggregates.loan_application import (
+        ApplicationState,
+        LoanApplicationAggregate,
+    )
+
     store = InMemoryEventStore()
     app_id = new_id()
 
-    cmd = SubmitApplicationCommand(
-        application_id=app_id,
-        applicant_id="applicant-001",
-        requested_amount_usd=500000,
-        loan_purpose="expansion",
+    # Put application in SUBMITTED state
+    await store.append(
+        stream_id=f"loan-{app_id}",
+        events=[{
+            "event_type": "ApplicationSubmitted",
+            "event_version": 1,
+            "payload": {
+                "application_id": app_id,
+                "applicant_id": "applicant-001",
+                "requested_amount_usd": "500000",
+                "loan_purpose": "expansion",
+                "submission_channel": "api",
+            },
+        }],
+        expected_version=-1,
     )
 
-    # First submission succeeds
-    await handle_submit_application(cmd, store)
+    # Load aggregate — state is now SUBMITTED
+    agg = await LoanApplicationAggregate.load(store, app_id)
+    assert agg.state == ApplicationState.SUBMITTED
 
-    # Second submission must raise
+    # Attempt invalid transition SUBMITTED → FINAL_APPROVED
     with pytest.raises(DomainError) as exc_info:
-        await handle_submit_application(cmd, store)
+        agg.assert_valid_transition(ApplicationState.FINAL_APPROVED)
 
-    assert exc_info.value.rule_violated == "application_already_exists"
+    assert exc_info.value.rule_violated == "invalid_transition"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
